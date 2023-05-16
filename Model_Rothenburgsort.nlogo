@@ -1,12 +1,14 @@
-extensions [gis]
+extensions [nw gis]
 
 globals [
   gebäude_unsaniert
   gebäude_saniert
   rothenburgsort
+  network_mode
+  anwohner_standorte
 ]
 
-
+; Verschiedene Agententypen
 breed [ anwohnerschaft anwohner ]
 anwohnerschaft-own [ mieter? country population ]
 
@@ -15,17 +17,20 @@ breed [hauseigentümerschaft hauseigentümer]
 breed [gewerbetreiberschaft gewerbebetreiber]
 
 
+; Verschiedene Netzwerke
+undirected-link-breed [bekanntschaften bekanntschaft]
+
+
 to setup
   ; Alles zurücksetzen
   clear-all
+
 
   ; Laden der Daten von Rothenburgsort
   set gebäude_unsaniert gis:load-dataset "data/unsaniert_rothenburgsort.json"
   set gebäude_saniert gis:load-dataset "data/saniert_rothenburgsort.json"
   set rothenburgsort gis:load-dataset "data/rothenburgsort.json"
 
-  ; Karte anzeigen
-  show-map
 
   ; Agenten erstellen
   foreach gis:feature-list-of gebäude_unsaniert [ this-vector-feature ->
@@ -35,6 +40,12 @@ to setup
     ]
   ]
 
+  create-network
+
+  ; Karte anzeigen
+  set network_mode false
+  show-map
+
 
   reset-ticks
 end
@@ -42,26 +53,58 @@ end
 to show-map
   ; Anzeigen der Geodaten auf der Karte
   ask patches [ set pcolor white]
+  ask links [hide-link]
   gis:set-world-envelope (gis:envelope-union-of (gis:envelope-of gebäude_unsaniert)
                                                 (gis:envelope-of gebäude_saniert))
   gis:set-drawing-color black
   gis:draw gebäude_unsaniert 1
   gis:draw rothenburgsort 1
+
+  ; Wechseln zwischen dem Netzwerkmodus und dem Kartenmodus
+  if network_mode
+  [
+    ask anwohnerschaft [die]
+  gis:create-turtles-from-points anwohner_standorte anwohnerschaft [
+      set shape "person"
+      set size 0.5
+    ]]
+  set network_mode false
+
+
 end
 
 to show-network
+  ask patches [set pcolor black]
+  ask links [show-link]
+  set anwohner_standorte gis:turtle-dataset anwohnerschaft
+  repeat 10 [ layout-spring anwohnerschaft links 0.2 5 1 ]
+  set network_mode true
 
 end
 
 to clear-map
   ask patches [set pcolor black]
 end
+
+
+to create-network
+  ; Zufällige Verbindungen zwischen 0-10 Personen herstellen
+  ask anwohnerschaft [
+    create-bekanntschaften-with other n-of random 10 anwohnerschaft
+  ]
+end
+
+
+to go
+
+
+end
 @#$#@#$#@
 GRAPHICS-WINDOW
-821
-19
-1294
-493
+1162
+14
+1635
+488
 -1
 -1
 15.0
@@ -102,27 +145,27 @@ NIL
 1
 
 BUTTON
-34
-73
-177
-106
+112
+29
+255
+62
 Simulation starten
-run
-NIL
+go
+T
 1
 T
 OBSERVER
 NIL
-R
+G
 NIL
 NIL
 1
 
 BUTTON
-823
-498
-946
-531
+1164
+493
+1287
+526
 Karte anzeigen
 show-map
 NIL
@@ -136,10 +179,10 @@ NIL
 1
 
 BUTTON
-956
-498
-1103
-531
+1297
+493
+1444
+526
 Netzwerk anzeigen
 show-network
 NIL
@@ -153,10 +196,10 @@ NIL
 1
 
 BUTTON
-1147
-497
-1297
-530
+1488
+492
+1638
+525
 Karte zurücksetzen
 clear-map
 NIL
