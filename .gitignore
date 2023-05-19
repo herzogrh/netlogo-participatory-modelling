@@ -162,5 +162,8 @@ cython_debug/
 # Files that are too large
 data/nw_abs_geb_saniert.json
 data/nw_abs_geb_unsaniert.json
+data/nw_spez_geb_saniert.json
+data/nw_spez_geb_unsaniert.json
+data/GebaeudeBauwerk.json
 
 *.tmp.nlogo

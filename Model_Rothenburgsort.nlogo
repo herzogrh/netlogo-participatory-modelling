@@ -1,24 +1,32 @@
 extensions [nw gis]
 
 globals [
-  gebäude_unsaniert
-  gebäude_saniert
+  wohngebäude
   rothenburgsort
+  anzahl_anwohner
+
   network_mode
   anwohner_standorte
 ]
 
 ; Verschiedene Agententypen
 breed [ anwohnerschaft anwohner ]
-anwohnerschaft-own [ mieter? country population ]
+anwohnerschaft-own [ mieter? verfügbares-einkommen  ]
 
-breed [hauseigentümerschaft hauseigentümer]
+breed [gebäudeeigentümerschaft gebäudeeigentümer]
+gebäudeeigentümerschaft-own [investitionsbereitschaft mieteinnahmen ]
 
 breed [gewerbetreiberschaft gewerbebetreiber]
+
+breed [bebauung gebäude]
+bebauung-own [ anzahl_wohnungen grundflaeche brutto_grundflache wärmebedarf_unsaniert wärmebedarf_saniert saniert? aktueller_wärmebedarf anwohner_im_gebäude]
 
 
 ; Verschiedene Netzwerke
 undirected-link-breed [bekanntschaften bekanntschaft]
+
+undirected-link-breed [wohnverhältnisse wohnverhältnis ]
+wohnverhältnisse-own [gemietet? mietkosten]
 
 
 to setup
@@ -27,18 +35,40 @@ to setup
 
 
   ; Laden der Daten von Rothenburgsort
-  set gebäude_unsaniert gis:load-dataset "data/unsaniert_rothenburgsort.json"
-  set gebäude_saniert gis:load-dataset "data/saniert_rothenburgsort.json"
+  set wohngebäude gis:load-dataset "data/wohngebeude_rothenburgsort_waerme.json"
   set rothenburgsort gis:load-dataset "data/rothenburgsort.json"
+  set anzahl_anwohner 8945
 
-
-  ; Agenten erstellen
-  foreach gis:feature-list-of gebäude_unsaniert [ this-vector-feature ->
-    gis:create-turtles-inside-polygon this-vector-feature anwohnerschaft 2 [
-      set shape "person"
+  ; Wohnhäuser erstellen
+  foreach gis:feature-list-of wohngebäude [ this-vector-feature ->
+    gis:create-turtles-inside-polygon this-vector-feature bebauung 1 [
+      set shape "house"
       set size 0.5
+      set saniert? random-float 1 < (Anteil-Modernisierte-Wohnungen-zu-Beginn / 100) ;Zufällig die Sanierung annehmen
+      set anwohner_im_gebäude floor brutto_grundflache / 32.6 ; Nach Stadtteilprofil 2022 gibt es 32.6 m2 Wohnfläche je Einwohner in Rothenburgsort
+
+      ; Den Wärmebedarf anpassen
+      ifelse saniert?
+      [set aktueller_wärmebedarf wärmebedarf_saniert]
+      [set aktueller_wärmebedarf wärmebedarf_unsaniert]
+
     ]
   ]
+
+  ; Anwohner erstellen - Schritt für Schritt die
+  while [(count anwohnerschaft) < anzahl_anwohner] [
+    ask n-of 1 bebauung [
+      let aktuelle_anwohner_im_gebäude count my-wohnverhältnisse
+      if anwohner_im_gebäude > aktuelle_anwohner_im_gebäude
+      [
+        hatch-anwohnerschaft 1 [
+          create-wohnverhältnis-with myself
+        ]
+      ]
+
+    ]
+  ]
+
 
   create-network
 
@@ -54,11 +84,12 @@ to show-map
   ; Anzeigen der Geodaten auf der Karte
   ask patches [ set pcolor white]
   ask links [hide-link]
-  gis:set-world-envelope (gis:envelope-union-of (gis:envelope-of gebäude_unsaniert)
-                                                (gis:envelope-of gebäude_saniert))
+  gis:set-world-envelope (gis:envelope-union-of (gis:envelope-of wohngebäude)
+                                                (gis:envelope-of wohngebäude))
   gis:set-drawing-color black
-  gis:draw gebäude_unsaniert 1
-  gis:draw rothenburgsort 1
+  gis:draw wohngebäude 1
+  ;gis:set-drawing-color black
+  ;gis:draw rothenburgsort 1
 
   ; Wechseln zwischen dem Netzwerkmodus und dem Kartenmodus
   if network_mode
@@ -82,29 +113,51 @@ to show-network
 
 end
 
+to gebäude-anzeigen
+  ask bebauung [
+    set hidden? false
+  ]
+end
+
+to gebäude-ausblenden
+  ask bebauung [
+    set hidden? true
+  ]
+end
+
+
 to clear-map
   ask patches [set pcolor black]
 end
 
 
+to create-population
+  ; Fakten von Rothenburgsort (aus den Stadtteilprofilen 2022)
+  ; 8945 Anwohner
+  ; 5048 Haushalte (2963 Einpersonenhaushalte, 896 Haushalte mit Kindern)
+  ; 539 Wohngebäude (4719 Wohnungen)
+
+
+
+end
+
+
 to create-network
   ; Zufällige Verbindungen zwischen 0-10 Personen herstellen
-  ask anwohnerschaft [
-    create-bekanntschaften-with other n-of random 10 anwohnerschaft
-  ]
+
 end
 
 
 to go
 
-
+  tick
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
-1162
-14
-1635
-488
+1016
+10
+1639
+484
 -1
 -1
 15.0
@@ -117,8 +170,8 @@ GRAPHICS-WINDOW
 1
 1
 1
--15
-15
+-20
+20
 -15
 15
 0
@@ -162,10 +215,10 @@ NIL
 1
 
 BUTTON
-1164
-493
-1287
-526
+1017
+494
+1140
+527
 Karte anzeigen
 show-map
 NIL
@@ -179,10 +232,10 @@ NIL
 1
 
 BUTTON
-1297
-493
-1444
-526
+1249
+494
+1396
+527
 Netzwerk anzeigen
 show-network
 NIL
@@ -196,10 +249,10 @@ NIL
 1
 
 BUTTON
-1488
-492
-1638
-525
+1489
+493
+1639
+526
 Karte zurücksetzen
 clear-map
 NIL
@@ -211,6 +264,103 @@ NIL
 NIL
 NIL
 1
+
+MONITOR
+272
+27
+329
+72
+NIL
+ticks
+17
+1
+11
+
+SLIDER
+31
+94
+374
+127
+Anteil-Modernisierte-Wohnungen-zu-Beginn
+Anteil-Modernisierte-Wohnungen-zu-Beginn
+0
+100
+20.0
+1
+1
+%
+HORIZONTAL
+
+PLOT
+735
+10
+994
+160
+Anwohner
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -16777216 true "" "plot count anwohnerschaft"
+
+BUTTON
+1017
+533
+1179
+566
+Gebäude anzeigen
+gebäude-anzeigen
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+BUTTON
+1018
+571
+1179
+604
+Gebäude ausblenden
+gebäude-ausblenden
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+PLOT
+735
+173
+995
+323
+Gebäude
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+true
+"" ""
+PENS
+"Saniert" 1.0 0 -11085214 true "" "plot count bebauung with [saniert?]"
+"Unsaniert" 1.0 0 -2674135 true "" "plot count bebauung with [saniert? = false]"
 
 @#$#@#$#@
 ## WHAT IS IT?
