@@ -14,12 +14,12 @@ breed [ anwohnerschaft anwohner ]
 anwohnerschaft-own [ mieter? verfügbares-einkommen  ]
 
 breed [gebäudeeigentümerschaft gebäudeeigentümer]
-gebäudeeigentümerschaft-own [investitionsbereitschaft mieteinnahmen ]
+gebäudeeigentümerschaft-own [typ investitionsbereitschaft mieteinnahmen ]
 
 breed [gewerbetreiberschaft gewerbebetreiber]
 
 breed [bebauung gebäude]
-bebauung-own [ anzahl_wohnungen grundflaeche brutto_grundflache wärmebedarf_unsaniert wärmebedarf_saniert saniert? aktueller_wärmebedarf anwohner_im_gebäude]
+bebauung-own [ anzahl_wohnungen grundflache brutto_grundflache wärmebedarf_unsaniert wärmebedarf_saniert saniert? aktueller_wärmebedarf anwohner_im_gebäude]
 
 
 ; Verschiedene Netzwerke
@@ -27,6 +27,8 @@ undirected-link-breed [bekanntschaften bekanntschaft]
 
 undirected-link-breed [wohnverhältnisse wohnverhältnis ]
 wohnverhältnisse-own [gemietet? mietkosten]
+
+undirected-link-breed [eigentumsverhältnisse eigentumsverhältnis ]
 
 
 to setup
@@ -44,7 +46,7 @@ to setup
     gis:create-turtles-inside-polygon this-vector-feature bebauung 1 [
       set shape "house"
       set size 0.5
-      set saniert? random-float 1 < (Anteil-Modernisierte-Wohnungen-zu-Beginn / 100) ;Zufällig die Sanierung annehmen
+      set saniert? random-float 1 < (Anteil-Modernisierte-Wohnungen-zu-Beginn / 100) ; Basierend auf dem Slider die Sanierung zuweisen
       set anwohner_im_gebäude floor brutto_grundflache / 32.6 ; Nach Stadtteilprofil 2022 gibt es 32.6 m2 Wohnfläche je Einwohner in Rothenburgsort
 
       ; Den Wärmebedarf anpassen
@@ -55,13 +57,38 @@ to setup
     ]
   ]
 
-  ; Anwohner erstellen - Schritt für Schritt die
+  ; Gebäudeeigentümer erstellen auf der Grundlage des Zensus 2011 (https://www.statistik-nord.de/fileadmin/maps/zensus2011_hh/index.html)
+
+  ; 92% sind zu Wohnzwecken vermietet
+  ; 6% sind von den Eigentümer*innen bewohnt
+  ; 2% stehen leer
+
+  ask bebauung [
+    ; Zufällig die Eigentümerschaft zuteilen
+    let zufall random-float 1
+
+      hatch-gebäudeeigentümerschaft 1 [
+        set typ (ifelse-value
+        zufall <= 0.16  [ "privatwirtschaftliches Unternehmen" ] ; 16% der Wohnungen sind im Besitz von privatwirschaftlichen Unternehmen
+        zufall <= 0.7  [ "öffentliches Unternehmen/Genossenschaft" ] ; 54% der Wohnungen sind im Besitz von öffentlichen Unternehmen oder Genossenschaften
+        zufall <= 0.89  [ "Privatperson" ] ; 19% der Wohnungen sind im Besitz von Privatpersonen
+        ["WEG" ]) ; 12% der Wohnungen sind im Besitz von WEGs
+
+      create-eigentumsverhältnis-with myself
+
+      ]
+  ]
+
+  ; Anwohner erstellen - Schritt für Schritt die Gebäude befüllen
   while [(count anwohnerschaft) < anzahl_anwohner] [
     ask n-of 1 bebauung [
       let aktuelle_anwohner_im_gebäude count my-wohnverhältnisse
+
       if anwohner_im_gebäude > aktuelle_anwohner_im_gebäude
       [
         hatch-anwohnerschaft 1 [
+          set shape "person"
+          set size 0.5
           create-wohnverhältnis-with myself
         ]
       ]
@@ -70,11 +97,12 @@ to setup
   ]
 
 
-  create-network
+
 
   ; Karte anzeigen
   set network_mode false
   show-map
+  update-visualization
 
 
   reset-ticks
@@ -91,6 +119,7 @@ to show-map
   ;gis:set-drawing-color black
   ;gis:draw rothenburgsort 1
 
+
   ; Wechseln zwischen dem Netzwerkmodus und dem Kartenmodus
   if network_mode
   [
@@ -104,11 +133,11 @@ to show-map
 
 end
 
+
 to show-network
   ask patches [set pcolor black]
-  ask links [show-link]
-  set anwohner_standorte gis:turtle-dataset anwohnerschaft
-  repeat 10 [ layout-spring anwohnerschaft links 0.2 5 1 ]
+  ask eigentumsverhältnisse [show-link]
+  layout-tutte gebäudeeigentümerschaft eigentumsverhältnisse 6
   set network_mode true
 
 end
@@ -131,25 +160,20 @@ to clear-map
 end
 
 
-to create-population
-  ; Fakten von Rothenburgsort (aus den Stadtteilprofilen 2022)
-  ; 8945 Anwohner
-  ; 5048 Haushalte (2963 Einpersonenhaushalte, 896 Haushalte mit Kindern)
-  ; 539 Wohngebäude (4719 Wohnungen)
+to update-visualization
+  ask bebauung with [saniert? = false] [
+    set color red
+  ]
 
-
-
-end
-
-
-to create-network
-  ; Zufällige Verbindungen zwischen 0-10 Personen herstellen
+  ask bebauung with [saniert? = true] [
+    set color green
+  ]
 
 end
 
 
 to go
-
+  update-visualization
   tick
 end
 @#$#@#$#@
