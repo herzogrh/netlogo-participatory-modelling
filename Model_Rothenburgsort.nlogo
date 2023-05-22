@@ -7,28 +7,36 @@ globals [
 
   network_mode
   anwohner_standorte
+  verfügbare-handwerksleistungen
 ]
 
 ; Verschiedene Agententypen
 breed [ anwohnerschaft anwohner ]
-anwohnerschaft-own [ mieter? verfügbares-einkommen  ]
+anwohnerschaft-own [ verfügbares-einkommen mietrechtliche-kenntnisse ]
 
 breed [gebäudeeigentümerschaft gebäudeeigentümer]
 gebäudeeigentümerschaft-own [typ investitionsbereitschaft mieteinnahmen ]
 
-breed [gewerbetreiberschaft gewerbebetreiber]
-
 breed [bebauung gebäude]
 bebauung-own [ anzahl_wohnungen grundflache brutto_grundflache wärmebedarf_unsaniert wärmebedarf_saniert saniert? aktueller_wärmebedarf anwohner_im_gebäude]
 
+breed [gewerbetreiberschaft gewerbebetreiber]
+
+breed [handwerkerschaft handwerker]
+
+breed [beratungsleistungen beratungsleistung]
+
 
 ; Verschiedene Netzwerke
-undirected-link-breed [bekanntschaften bekanntschaft]
-
 undirected-link-breed [wohnverhältnisse wohnverhältnis ]
-wohnverhältnisse-own [gemietet? mietkosten]
+wohnverhältnisse-own [gemietet? preisbindung? mietkosten]
 
-undirected-link-breed [eigentumsverhältnisse eigentumsverhältnis ]
+undirected-link-breed [eigentumsverhältnisse eigentumsverhältnis]
+eigentumsverhältnisse-own [modernisiernisierung-status verbleibende-zeit]
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;; Modell-Setup  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
 to setup
@@ -40,6 +48,7 @@ to setup
   set wohngebäude gis:load-dataset "data/wohngebeude_rothenburgsort_waerme.json"
   set rothenburgsort gis:load-dataset "data/rothenburgsort.json"
   set anzahl_anwohner 8945
+
 
   ; Wohnhäuser erstellen
   foreach gis:feature-list-of wohngebäude [ this-vector-feature ->
@@ -57,16 +66,14 @@ to setup
     ]
   ]
 
-  ; Gebäudeeigentümer erstellen auf der Grundlage des Zensus 2011 (https://www.statistik-nord.de/fileadmin/maps/zensus2011_hh/index.html)
+  ; Gebäudeeigentümer erstellen auf der Grundlage des Zensus 2011
+  ; (https://www.statistik-nord.de/fileadmin/maps/zensus2011_hh/index.html)
 
-  ; 92% sind zu Wohnzwecken vermietet
-  ; 6% sind von den Eigentümer*innen bewohnt
-  ; 2% stehen leer
 
+  ; Gebäude den jeweiligen Eigentümern zuordnen
   ask bebauung [
     ; Zufällig die Eigentümerschaft zuteilen
     let zufall random-float 1
-
       hatch-gebäudeeigentümerschaft 1 [
         set typ (ifelse-value
         zufall <= 0.16  [ "privatwirtschaftliches Unternehmen" ] ; 16% der Wohnungen sind im Besitz von privatwirschaftlichen Unternehmen
@@ -74,10 +81,19 @@ to setup
         zufall <= 0.89  [ "Privatperson" ] ; 19% der Wohnungen sind im Besitz von Privatpersonen
         ["WEG" ]) ; 12% der Wohnungen sind im Besitz von WEGs
 
-      create-eigentumsverhältnis-with myself
+      set investitionsbereitschaft "niedrig"
+
+      create-eigentumsverhältnis-with myself [
+        ifelse [saniert?] of other-end [
+          set modernisiernisierung-status "erledigt"
+        ][
+          set modernisiernisierung-status "nicht begonnen"
+        ]
+      ]
 
       ]
   ]
+
 
   ; Anwohner erstellen - Schritt für Schritt die Gebäude befüllen
   while [(count anwohnerschaft) < anzahl_anwohner] [
@@ -89,14 +105,38 @@ to setup
         hatch-anwohnerschaft 1 [
           set shape "person"
           set size 0.5
-          create-wohnverhältnis-with myself
+
+          ; Einkommen der Anwohner
+          ; nach Stadtteilprofil 2022: 3780 Sozialversicherungspflichtig Beschäftigte
+
+          ; Wohnverhältnis ausgestalten
+          create-wohnverhältnis-with myself [
+
+            ; In 6% der Fälle sind die Wohnungen von den Eigentümer:innen bewohnt
+            let zufall_vermietet random-float 1
+
+            ifelse zufall_vermietet < 0.06 [ set gemietet? false ][ set gemietet? true ]
+
+
+            ; Falls vermietet, Miete festlegen auf Grundlage der Marktanalyse des Hamburger Wohnungsmarktes
+            ; https://www.vnw.de/fileadmin/user_upload/2019-10-29_Studientext-CRES-Studie-HH-Mietwohnungsmarkt19-MW_V9.pdf
+
+            if gemietet? [
+              ; Laut Stadtteilprofil sind 20% der Wohnungen in Rothenburgsort Sozialwohnungen und damit preisgebunden
+              let zufall_preisbindung random-float 1
+              ifelse zufall_preisbindung < 0.2 [
+                set preisbindung? false
+                set mietkosten random-normal 7.08 0.735
+              ][
+                set preisbindung? true
+                set mietkosten random-normal 5.99 0.59
+              ]
+            ]
+          ]
         ]
       ]
-
     ]
   ]
-
-
 
 
   ; Karte anzeigen
@@ -107,6 +147,10 @@ to setup
 
   reset-ticks
 end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;; Funktionen zur Visualisierung ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 to show-map
   ; Anzeigen der Geodaten auf der Karte
@@ -133,11 +177,10 @@ to show-map
 
 end
 
-
 to show-network
-  ask patches [set pcolor black]
+  ;ask patches [set pcolor black]
   ask eigentumsverhältnisse [show-link]
-  layout-tutte gebäudeeigentümerschaft eigentumsverhältnisse 6
+  ;layout-tutte gebäudeeigentümerschaft eigentumsverhältnisse 6
   set network_mode true
 
 end
@@ -154,6 +197,29 @@ to gebäude-ausblenden
   ]
 end
 
+to anwohner-anzeigen
+  ask anwohnerschaft [
+    set hidden? false
+  ]
+end
+
+to anwohner-ausblenden
+  ask anwohnerschaft [
+    set hidden? true
+  ]
+end
+
+to eigentümer-anzeigen
+  ask gebäudeeigentümerschaft [
+    set hidden? false
+  ]
+end
+
+to eigentümer-ausblenden
+  ask gebäudeeigentümerschaft [
+    set hidden? true
+  ]
+end
 
 to clear-map
   ask patches [set pcolor black]
@@ -171,10 +237,104 @@ to update-visualization
 
 end
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;; Funktionen zur Simulation ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 
 to go
-  update-visualization
+
+  ; Verfügbare Handwerksleistungen für diesen Monat zurücksetzen
+  set verfügbare-handwerksleistungen Verfügbarkeit-Handwerks-und-Bauleistungen
+
+  ; Gebäudeeigentümer:innen treffen Modernisierungsentscheidungen
+  ask gebäudeeigentümerschaft [
+
+    ; Überlegen, ob eine Modernisierungsentscheidung getroffen wird
+      ask my-eigentumsverhältnisse with [modernisiernisierung-status = "nicht begonnen"] [
+        if modernisierungsentscheidung-treffen [investitionsbereitschaft] of myself [
+          set modernisiernisierung-status "in Finanzierung"
+        ]
+      ]
+
+
+    ; Falls getroffen, nach Finanzierung suchen
+      ask my-eigentumsverhältnisse with [modernisiernisierung-status = "in Finanzierung"] [
+        if finanzierung-suchen [
+          set modernisiernisierung-status "in Planung"
+          set verbleibende-zeit Dauer-Planung-und-Genehmigung-der-Modernisierung
+        ]
+      ]
+
+
+    ; Planung und Genehmigung abwarten
+    ask my-eigentumsverhältnisse with [modernisiernisierung-status = "in Planung"] [
+      ifelse verbleibende-zeit > 0 [
+        set verbleibende-zeit (verbleibende-zeit - 1)
+      ] [
+        set modernisiernisierung-status "in Bau"
+      ]
+     ]
+
+
+    ; Bau je nach Verfügbarkeit ausführen
+    ask my-eigentumsverhältnisse with [modernisiernisierung-status = "in Bau"] [
+      if verfügbare-handwerksleistungen > 0 [
+        set verfügbare-handwerksleistungen (verfügbare-handwerksleistungen - 1)
+        set modernisiernisierung-status "erledigt"
+
+        ; Gebäude auf saniert umstellen
+        ask other-end [
+          set saniert? true
+          set aktueller_wärmebedarf wärmebedarf_saniert
+          set color green
+        ]
+
+
+      ]
+     ]
+
+
+
+
+
+
+  ]
+
   tick
+end
+
+
+to mieteinnahmen-berechnen
+
+
+
+end
+
+to-report modernisierungsentscheidung-treffen [invest-bereitschaft]
+  let wahrscheinlichkeit-modernisierung 0
+  set wahrscheinlichkeit-modernisierung (ifelse-value
+        invest-bereitschaft = "niedrig"  [ 0.05 ]
+        invest-bereitschaft = "mittel"  [ 0.4 ]
+        invest-bereitschaft = "hoch"  [ 0.75 ]
+        [0 ]) ;
+
+  ; Entscheidung wird zufällig getroffen
+  ifelse random-float 1 < wahrscheinlichkeit-modernisierung [ report true  ] [ report false ]
+
+end
+
+to-report finanzierung-suchen
+  let wahrscheinlichkeit-finanzierung 0
+  set wahrscheinlichkeit-finanzierung (ifelse-value
+        Verfügbare-Fördermittel = "niedrig"  [ 0.05 ]
+        Verfügbare-Fördermittel = "mittel"  [ 0.4 ]
+        Verfügbare-Fördermittel = "hoch"  [ 0.75 ]
+        [0 ]) ;
+
+  ; Entscheidung wird zufällig getroffen
+  ifelse random-float 1 < wahrscheinlichkeit-finanzierung [ report true  ] [ report false ]
+
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
@@ -290,11 +450,11 @@ NIL
 1
 
 MONITOR
-272
-27
-329
-72
-NIL
+284
+31
+342
+76
+Monate
 ticks
 17
 1
@@ -302,9 +462,9 @@ ticks
 
 SLIDER
 31
-94
-374
-127
+102
+476
+135
 Anteil-Modernisierte-Wohnungen-zu-Beginn
 Anteil-Modernisierte-Wohnungen-zu-Beginn
 0
@@ -318,8 +478,8 @@ HORIZONTAL
 PLOT
 735
 10
-994
-160
+1006
+134
 Anwohner
 NIL
 NIL
@@ -335,9 +495,9 @@ PENS
 
 BUTTON
 1017
-533
+553
 1179
-566
+586
 Gebäude anzeigen
 gebäude-anzeigen
 NIL
@@ -352,9 +512,9 @@ NIL
 
 BUTTON
 1018
-571
+591
 1179
-604
+624
 Gebäude ausblenden
 gebäude-ausblenden
 NIL
@@ -369,9 +529,9 @@ NIL
 
 PLOT
 735
-173
-995
-323
+142
+1006
+262
 Gebäude
 NIL
 NIL
@@ -385,6 +545,154 @@ true
 PENS
 "Saniert" 1.0 0 -11085214 true "" "plot count bebauung with [saniert?]"
 "Unsaniert" 1.0 0 -2674135 true "" "plot count bebauung with [saniert? = false]"
+
+BUTTON
+1187
+554
+1395
+587
+Anwohner:innen anzeigen
+anwohner-anzeigen
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+BUTTON
+1187
+591
+1395
+624
+Anwohner:innen ausblenden
+anwohner-ausblenden
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+BUTTON
+1405
+551
+1637
+584
+Gebäudeeigentümer anzeigen
+eigentümer-anzeigen
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+BUTTON
+1405
+590
+1636
+623
+Gebäudeeigentümer ausblenden
+eigentümer-ausblenden
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+PLOT
+735
+270
+1003
+395
+Mietkosten
+€ / m2 und Monat
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+false
+"" ""
+PENS
+"default" 1.0 1 -16777216 true "" "histogram [mietkosten] of wohnverhältnisse"
+
+CHOOSER
+33
+302
+210
+347
+Verfügbare-Fördermittel
+Verfügbare-Fördermittel
+"keine" "niedrig" "mittel" "hoch"
+1
+
+SLIDER
+32
+181
+475
+214
+Dauer-Planung-und-Genehmigung-der-Modernisierung
+Dauer-Planung-und-Genehmigung-der-Modernisierung
+1
+36
+10.0
+1
+1
+Monate
+HORIZONTAL
+
+PLOT
+726
+435
+1002
+587
+Status Modernisierung
+Monate
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+true
+"" ""
+PENS
+"Nicht begonnen" 1.0 0 -16777216 true "" "plot count eigentumsverhältnisse with [modernisiernisierung-status = \"nicht begonnen\"]"
+"In Finanzierung" 1.0 0 -7500403 true "" "plot count eigentumsverhältnisse with [modernisiernisierung-status = \"in Finanzierung\"]"
+"In Planung" 1.0 0 -5207188 true "" "plot count eigentumsverhältnisse with [modernisiernisierung-status = \"in Planung\"]"
+"In Bau" 1.0 0 -723837 true "" "plot count eigentumsverhältnisse with [modernisiernisierung-status = \"in Bau\"]"
+"modernisiert" 1.0 0 -8330359 true "" "plot count eigentumsverhältnisse with [modernisiernisierung-status = \"erledigt\"]"
+
+SLIDER
+32
+219
+475
+252
+Verfügbarkeit-Handwerks-und-Bauleistungen
+Verfügbarkeit-Handwerks-und-Bauleistungen
+0
+25
+9.0
+1
+1
+Gebäude pro Monat
+HORIZONTAL
 
 @#$#@#$#@
 ## WHAT IS IT?
