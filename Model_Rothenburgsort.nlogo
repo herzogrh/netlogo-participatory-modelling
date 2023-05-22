@@ -3,6 +3,9 @@ extensions [nw gis]
 globals [
   wohngebäude
   rothenburgsort
+  strassen
+  gewaesser
+  gruenanlagen
   anzahl_anwohner
 
   network_mode
@@ -12,7 +15,7 @@ globals [
 
 ; Verschiedene Agententypen
 breed [ anwohnerschaft anwohner ]
-anwohnerschaft-own [ verfügbares-einkommen mietrechtliche-kenntnisse ]
+anwohnerschaft-own [ verfügbares-einkommen mietrechtliche-kenntnisse umzugsentscheidung? weggezogen? ]
 
 breed [gebäudeeigentümerschaft gebäudeeigentümer]
 gebäudeeigentümerschaft-own [typ investitionsbereitschaft mieteinnahmen ]
@@ -47,6 +50,9 @@ to setup
   ; Laden der Daten von Rothenburgsort
   set wohngebäude gis:load-dataset "data/wohngebeude_rothenburgsort_waerme.json"
   set rothenburgsort gis:load-dataset "data/rothenburgsort.json"
+  set strassen gis:load-dataset "data/strassen_rbo.json"
+  set gewaesser gis:load-dataset "data/gewaesser_rbo.json"
+  set gruenanlagen gis:load-dataset "data/gruenanlagen_rbo.json"
   set anzahl_anwohner 8945
 
 
@@ -55,6 +61,7 @@ to setup
     gis:create-turtles-inside-polygon this-vector-feature bebauung 1 [
       set shape "house"
       set size 0.5
+      set hidden? true
       set saniert? random-float 1 < (Anteil-Modernisierte-Wohnungen-zu-Beginn / 100) ; Basierend auf dem Slider die Sanierung zuweisen
       set anwohner_im_gebäude floor brutto_grundflache / 32.6 ; Nach Stadtteilprofil 2022 gibt es 32.6 m2 Wohnfläche je Einwohner in Rothenburgsort
 
@@ -74,14 +81,15 @@ to setup
   ask bebauung [
     ; Zufällig die Eigentümerschaft zuteilen
     let zufall random-float 1
-      hatch-gebäudeeigentümerschaft 1 [
-        set typ (ifelse-value
+    hatch-gebäudeeigentümerschaft 1 [
+      set typ (ifelse-value
         zufall <= 0.16  [ "privatwirtschaftliches Unternehmen" ] ; 16% der Wohnungen sind im Besitz von privatwirschaftlichen Unternehmen
         zufall <= 0.7  [ "öffentliches Unternehmen/Genossenschaft" ] ; 54% der Wohnungen sind im Besitz von öffentlichen Unternehmen oder Genossenschaften
         zufall <= 0.89  [ "Privatperson" ] ; 19% der Wohnungen sind im Besitz von Privatpersonen
         ["WEG" ]) ; 12% der Wohnungen sind im Besitz von WEGs
 
       set investitionsbereitschaft "niedrig"
+      set hidden? true
 
       create-eigentumsverhältnis-with myself [
         ifelse [saniert?] of other-end [
@@ -91,7 +99,7 @@ to setup
         ]
       ]
 
-      ]
+    ]
   ]
 
 
@@ -105,6 +113,7 @@ to setup
         hatch-anwohnerschaft 1 [
           set shape "person"
           set size 0.5
+          set hidden? true
 
           ; Einkommen der Anwohner
           ; nach Stadtteilprofil 2022: 3780 Sozialversicherungspflichtig Beschäftigte
@@ -157,22 +166,26 @@ to show-map
   ask patches [ set pcolor white]
   ask links [hide-link]
   gis:set-world-envelope (gis:envelope-union-of (gis:envelope-of wohngebäude)
-                                                (gis:envelope-of wohngebäude))
+    (gis:envelope-of wohngebäude))
   gis:set-drawing-color black
-  gis:draw wohngebäude 1
-  ;gis:set-drawing-color black
-  ;gis:draw rothenburgsort 1
+  gis:fill wohngebäude 1
+
+  gis:set-drawing-color grey
+  gis:fill strassen 1
+
+  gis:set-drawing-color blue
+  gis:fill gewaesser 1
+
+  gis:set-drawing-color green
+  gis:fill gruenanlagen 1
 
 
   ; Wechseln zwischen dem Netzwerkmodus und dem Kartenmodus
-  if network_mode
-  [
-    ask anwohnerschaft [die]
-  gis:create-turtles-from-points anwohner_standorte anwohnerschaft [
-      set shape "person"
-      set size 0.5
-    ]]
   set network_mode false
+
+  ask patches with [pxcor < -10 and pycor < -10] [
+    set pcolor grey - 3
+  ]
 
 
 end
@@ -247,24 +260,41 @@ to go
   ; Verfügbare Handwerksleistungen für diesen Monat zurücksetzen
   set verfügbare-handwerksleistungen Verfügbarkeit-Handwerks-und-Bauleistungen
 
+  ; Prozess der Mieterhöhung simulieren
+  mieterhöhung-prozess
+
+
+
+
+
+
+
+
+
+  tick
+end
+
+
+to mieterhöhung-prozess ; Auf Basis des gemeinsam modellierten Prozesses
+
   ; Gebäudeeigentümer:innen treffen Modernisierungsentscheidungen
   ask gebäudeeigentümerschaft [
 
     ; Überlegen, ob eine Modernisierungsentscheidung getroffen wird
-      ask my-eigentumsverhältnisse with [modernisiernisierung-status = "nicht begonnen"] [
-        if modernisierungsentscheidung-treffen [investitionsbereitschaft] of myself [
-          set modernisiernisierung-status "in Finanzierung"
-        ]
+    ask my-eigentumsverhältnisse with [modernisiernisierung-status = "nicht begonnen"] [
+      if modernisierungsentscheidung-treffen [investitionsbereitschaft] of myself [
+        set modernisiernisierung-status "in Finanzierung"
       ]
+    ]
 
 
     ; Falls getroffen, nach Finanzierung suchen
-      ask my-eigentumsverhältnisse with [modernisiernisierung-status = "in Finanzierung"] [
-        if finanzierung-suchen [
-          set modernisiernisierung-status "in Planung"
-          set verbleibende-zeit Dauer-Planung-und-Genehmigung-der-Modernisierung
-        ]
+    ask my-eigentumsverhältnisse with [modernisiernisierung-status = "in Finanzierung"] [
+      if finanzierung-suchen [
+        set modernisiernisierung-status "in Planung"
+        set verbleibende-zeit Dauer-Planung-und-Genehmigung-der-Modernisierung
       ]
+    ]
 
 
     ; Planung und Genehmigung abwarten
@@ -273,9 +303,23 @@ to go
         set verbleibende-zeit (verbleibende-zeit - 1)
       ] [
         set modernisiernisierung-status "in Bau"
-      ]
-     ]
 
+        ; Wegzug findet bei Modernisierungsankündigung statt
+        ask [my-wohnverhältnisse] of other-end [
+
+          let zufall-wegzug random-float 1
+          if zufall-wegzug < (Umzugsentscheidung-bei-Modernisierungsankündigung / 100) [
+            ask both-ends [
+
+              if is-anwohner? self [
+                set umzugsentscheidung? true
+                setxy [pxcor] of one-of patches with [pcolor = grey - 3] [pycor] of one-of patches with [pcolor = grey - 3]
+              ]
+            ]
+          ]
+        ]
+      ]
+    ]
 
     ; Bau je nach Verfügbarkeit ausführen
     ask my-eigentumsverhältnisse with [modernisiernisierung-status = "in Bau"] [
@@ -290,23 +334,21 @@ to go
           set color green
         ]
 
+        ; Modernisierungsmieterhöhung durchführen
+        ; Gesamtkosten der Sanierung berechnen
+        let gesamtkosten-sanierung Durchschnittliche-Kosten-für-energetische-Modernisierung * [brutto_grundflache] of other-end
+        let umlage gesamtkosten-sanierung * Maximale-Modernisierungsmieterhöhung
+        let anzahl_mieter:innen count ([my-wohnverhältnisse] of other-end) with [gemietet?]
+
+        ; Miete erhöhen
+        ask [wohnverhältnisse] of other-end [
+          set mietkosten mietkosten + umlage / anzahl_mieter:innen
+        ]
+
 
       ]
-     ]
-
-
-
-
-
-
+    ]
   ]
-
-  tick
-end
-
-
-to mieteinnahmen-berechnen
-
 
 
 end
@@ -314,10 +356,10 @@ end
 to-report modernisierungsentscheidung-treffen [invest-bereitschaft]
   let wahrscheinlichkeit-modernisierung 0
   set wahrscheinlichkeit-modernisierung (ifelse-value
-        invest-bereitschaft = "niedrig"  [ 0.05 ]
-        invest-bereitschaft = "mittel"  [ 0.4 ]
-        invest-bereitschaft = "hoch"  [ 0.75 ]
-        [0 ]) ;
+    invest-bereitschaft = "niedrig"  [ 0.01 ]
+    invest-bereitschaft = "mittel"  [ 0.4 ]
+    invest-bereitschaft = "hoch"  [ 0.75 ]
+    [0 ]) ;
 
   ; Entscheidung wird zufällig getroffen
   ifelse random-float 1 < wahrscheinlichkeit-modernisierung [ report true  ] [ report false ]
@@ -327,13 +369,33 @@ end
 to-report finanzierung-suchen
   let wahrscheinlichkeit-finanzierung 0
   set wahrscheinlichkeit-finanzierung (ifelse-value
-        Verfügbare-Fördermittel = "niedrig"  [ 0.05 ]
-        Verfügbare-Fördermittel = "mittel"  [ 0.4 ]
-        Verfügbare-Fördermittel = "hoch"  [ 0.75 ]
-        [0 ]) ;
+    Verfügbare-Fördermittel = "niedrig"  [ 0.05 ]
+    Verfügbare-Fördermittel = "mittel"  [ 0.4 ]
+    Verfügbare-Fördermittel = "hoch"  [ 0.75 ]
+    [0 ]) ;
 
   ; Entscheidung wird zufällig getroffen
   ifelse random-float 1 < wahrscheinlichkeit-finanzierung [ report true  ] [ report false ]
+
+end
+
+to verdrängung-prozess
+  ask anwohnerschaft with [umzugsentscheidung?] [
+
+
+  ]
+end
+
+
+to-report aktuelles-jahr
+  let simulierte_zeit (ticks / 12)
+  set simulierte_zeit floor simulierte_zeit
+
+  report simulierte_zeit + 2020
+end
+
+to-report aktueller-monat
+  report ticks mod 12 + 1
 
 end
 @#$#@#$#@
@@ -450,12 +512,12 @@ NIL
 1
 
 MONITOR
-284
-31
-342
-76
+357
+32
+415
+77
 Monate
-ticks
+aktueller-monat
 17
 1
 11
@@ -469,17 +531,17 @@ Anteil-Modernisierte-Wohnungen-zu-Beginn
 Anteil-Modernisierte-Wohnungen-zu-Beginn
 0
 100
-20.0
+16.0
 1
 1
 %
 HORIZONTAL
 
 PLOT
-735
-10
-1006
-134
+684
+313
+1009
+437
 Anwohner
 NIL
 NIL
@@ -491,14 +553,14 @@ true
 false
 "" ""
 PENS
-"default" 1.0 0 -16777216 true "" "plot count anwohnerschaft"
+"default" 1.0 0 -16777216 true "" "plot count (anwohnerschaft with [not weggezogen?])"
 
 BUTTON
-1017
+1018
 553
-1179
+1176
 586
-Gebäude anzeigen
+Wohngebäude anzeigen
 gebäude-anzeigen
 NIL
 1
@@ -512,10 +574,10 @@ NIL
 
 BUTTON
 1018
-591
-1179
-624
-Gebäude ausblenden
+590
+1176
+623
+Wohngebäude ausblenden
 gebäude-ausblenden
 NIL
 1
@@ -526,25 +588,6 @@ NIL
 NIL
 NIL
 1
-
-PLOT
-735
-142
-1006
-262
-Gebäude
-NIL
-NIL
-0.0
-10.0
-0.0
-10.0
-true
-true
-"" ""
-PENS
-"Saniert" 1.0 0 -11085214 true "" "plot count bebauung with [saniert?]"
-"Unsaniert" 1.0 0 -2674135 true "" "plot count bebauung with [saniert? = false]"
 
 BUTTON
 1187
@@ -615,28 +658,28 @@ NIL
 1
 
 PLOT
-735
-270
-1003
-395
+684
+180
+1008
+305
 Mietkosten
 € / m2 und Monat
 NIL
 0.0
-10.0
+15.0
 0.0
 10.0
 true
 false
 "" ""
 PENS
-"default" 1.0 1 -16777216 true "" "histogram [mietkosten] of wohnverhältnisse"
+"default" 0.5 1 -16777216 true "" "histogram [mietkosten] of wohnverhältnisse"
 
 CHOOSER
-33
-302
-210
-347
+32
+285
+209
+330
 Verfügbare-Fördermittel
 Verfügbare-Fördermittel
 "keine" "niedrig" "mittel" "hoch"
@@ -651,18 +694,18 @@ Dauer-Planung-und-Genehmigung-der-Modernisierung
 Dauer-Planung-und-Genehmigung-der-Modernisierung
 1
 36
-10.0
+17.0
 1
 1
 Monate
 HORIZONTAL
 
 PLOT
-726
-435
-1002
-587
-Status Modernisierung
+684
+10
+1009
+174
+Status Gebäudemodernisierung
 Monate
 NIL
 0.0
@@ -673,7 +716,7 @@ true
 true
 "" ""
 PENS
-"Nicht begonnen" 1.0 0 -16777216 true "" "plot count eigentumsverhältnisse with [modernisiernisierung-status = \"nicht begonnen\"]"
+"Nicht begonnen" 1.0 0 -2139308 true "" "plot count eigentumsverhältnisse with [modernisiernisierung-status = \"nicht begonnen\"]"
 "In Finanzierung" 1.0 0 -7500403 true "" "plot count eigentumsverhältnisse with [modernisiernisierung-status = \"in Finanzierung\"]"
 "In Planung" 1.0 0 -5207188 true "" "plot count eigentumsverhältnisse with [modernisiernisierung-status = \"in Planung\"]"
 "In Bau" 1.0 0 -723837 true "" "plot count eigentumsverhältnisse with [modernisiernisierung-status = \"in Bau\"]"
@@ -688,11 +731,85 @@ Verfügbarkeit-Handwerks-und-Bauleistungen
 Verfügbarkeit-Handwerks-und-Bauleistungen
 0
 25
-9.0
+2.0
 1
 1
 Gebäude pro Monat
 HORIZONTAL
+
+SLIDER
+27
+441
+464
+474
+Umzugsentscheidung-bei-Modernisierungsankündigung
+Umzugsentscheidung-bei-Modernisierungsankündigung
+0
+100
+18.0
+1
+1
+%
+HORIZONTAL
+
+SLIDER
+26
+484
+469
+517
+Durchschnittliche-Kosten-für-energetische-Modernisierung
+Durchschnittliche-Kosten-für-energetische-Modernisierung
+100
+300
+210.0
+10
+1
+€/m2
+HORIZONTAL
+
+MONITOR
+291
+31
+348
+76
+Jahr
+aktuelles-jahr
+17
+1
+11
+
+SLIDER
+26
+528
+466
+561
+Maximale-Modernisierungsmieterhöhung
+Maximale-Modernisierungsmieterhöhung
+0
+100
+46.0
+1
+1
+% der Modernisierungskosten
+HORIZONTAL
+
+PLOT
+742
+473
+942
+623
+plot 1
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -16777216 true "" "plot mean [mietkosten] of wohnverhältnisse"
 
 @#$#@#$#@
 ## WHAT IS IT?
