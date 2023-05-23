@@ -35,7 +35,7 @@ undirected-link-breed [wohnverhältnisse wohnverhältnis ]
 wohnverhältnisse-own [gemietet? preisbindung? mietkosten]
 
 undirected-link-breed [eigentumsverhältnisse eigentumsverhältnis]
-eigentumsverhältnisse-own [modernisiernisierung-status verbleibende-zeit]
+eigentumsverhältnisse-own [modernisierungs-status verbleibende-zeit]
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;; Modell-Setup  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -93,9 +93,9 @@ to setup
 
       create-eigentumsverhältnis-with myself [
         ifelse [saniert?] of other-end [
-          set modernisiernisierung-status "erledigt"
+          set modernisierungs-status "erledigt"
         ][
-          set modernisiernisierung-status "nicht begonnen"
+          set modernisierungs-status "nicht begonnen"
         ]
       ]
 
@@ -114,6 +114,8 @@ to setup
           set shape "person"
           set size 0.5
           set hidden? true
+          set umzugsentscheidung? false
+          set weggezogen? false
 
           ; Einkommen der Anwohner
           ; nach Stadtteilprofil 2022: 3780 Sozialversicherungspflichtig Beschäftigte
@@ -256,20 +258,13 @@ end
 
 
 to go
-
-  ; Verfügbare Handwerksleistungen für diesen Monat zurücksetzen
-  set verfügbare-handwerksleistungen Verfügbarkeit-Handwerks-und-Bauleistungen
+  if aktuelles-jahr > 2020 + Simulationszeit [stop]
 
   ; Prozess der Mieterhöhung simulieren
   mieterhöhung-prozess
 
-
-
-
-
-
-
-
+  ; Prozess der Verdrängung simulieren
+  verdrängung-prozess
 
   tick
 end
@@ -277,32 +272,35 @@ end
 
 to mieterhöhung-prozess ; Auf Basis des gemeinsam modellierten Prozesses
 
+  ; Verfügbare Handwerksleistungen für diesen Monat zurücksetzen
+  set verfügbare-handwerksleistungen Verfügbarkeit-Handwerks-und-Bauleistungen
+
   ; Gebäudeeigentümer:innen treffen Modernisierungsentscheidungen
   ask gebäudeeigentümerschaft [
 
     ; Überlegen, ob eine Modernisierungsentscheidung getroffen wird
-    ask my-eigentumsverhältnisse with [modernisiernisierung-status = "nicht begonnen"] [
+    ask my-eigentumsverhältnisse with [modernisierungs-status = "nicht begonnen"] [
       if modernisierungsentscheidung-treffen [investitionsbereitschaft] of myself [
-        set modernisiernisierung-status "in Finanzierung"
+        set modernisierungs-status "in Finanzierung"
       ]
     ]
 
 
     ; Falls getroffen, nach Finanzierung suchen
-    ask my-eigentumsverhältnisse with [modernisiernisierung-status = "in Finanzierung"] [
+    ask my-eigentumsverhältnisse with [modernisierungs-status = "in Finanzierung"] [
       if finanzierung-suchen [
-        set modernisiernisierung-status "in Planung"
+        set modernisierungs-status "in Planung"
         set verbleibende-zeit Dauer-Planung-und-Genehmigung-der-Modernisierung
       ]
     ]
 
 
     ; Planung und Genehmigung abwarten
-    ask my-eigentumsverhältnisse with [modernisiernisierung-status = "in Planung"] [
+    ask my-eigentumsverhältnisse with [modernisierungs-status = "in Planung"] [
       ifelse verbleibende-zeit > 0 [
         set verbleibende-zeit (verbleibende-zeit - 1)
       ] [
-        set modernisiernisierung-status "in Bau"
+        set modernisierungs-status "in Bau"
 
         ; Wegzug findet bei Modernisierungsankündigung statt
         ask [my-wohnverhältnisse] of other-end [
@@ -313,7 +311,7 @@ to mieterhöhung-prozess ; Auf Basis des gemeinsam modellierten Prozesses
 
               if is-anwohner? self [
                 set umzugsentscheidung? true
-                setxy [pxcor] of one-of patches with [pcolor = grey - 3] [pycor] of one-of patches with [pcolor = grey - 3]
+
               ]
             ]
           ]
@@ -322,10 +320,10 @@ to mieterhöhung-prozess ; Auf Basis des gemeinsam modellierten Prozesses
     ]
 
     ; Bau je nach Verfügbarkeit ausführen
-    ask my-eigentumsverhältnisse with [modernisiernisierung-status = "in Bau"] [
+    ask my-eigentumsverhältnisse with [modernisierungs-status = "in Bau"] [
       if verfügbare-handwerksleistungen > 0 [
         set verfügbare-handwerksleistungen (verfügbare-handwerksleistungen - 1)
-        set modernisiernisierung-status "erledigt"
+        set modernisierungs-status "erledigt"
 
         ; Gebäude auf saniert umstellen
         ask other-end [
@@ -336,13 +334,20 @@ to mieterhöhung-prozess ; Auf Basis des gemeinsam modellierten Prozesses
 
         ; Modernisierungsmieterhöhung durchführen
         ; Gesamtkosten der Sanierung berechnen
-        let gesamtkosten-sanierung Durchschnittliche-Kosten-für-energetische-Modernisierung * [brutto_grundflache] of other-end
-        let umlage gesamtkosten-sanierung * Maximale-Modernisierungsmieterhöhung
+        let umlage Durchschnittliche-Kosten-für-energetische-Modernisierung * (Maximale-Modernisierungsmieterhöhung / 100) / 12 / [brutto_grundflache] of other-end
         let anzahl_mieter:innen count ([my-wohnverhältnisse] of other-end) with [gemietet?]
 
-        ; Miete erhöhen
-        ask [wohnverhältnisse] of other-end [
-          set mietkosten mietkosten + umlage / anzahl_mieter:innen
+        if anzahl_mieter:innen > 0 [
+          let erhöhung_pro_mieter umlage / anzahl_mieter:innen
+          if erhöhung_pro_mieter > 1 [show erhöhung_pro_mieter]
+
+
+          ; Miete erhöhen
+          ask [wohnverhältnisse] of other-end [
+            if gemietet? and not preisbindung? [
+              set mietkosten (mietkosten + erhöhung_pro_mieter)
+            ]
+          ]
         ]
 
 
@@ -370,8 +375,8 @@ to-report finanzierung-suchen
   let wahrscheinlichkeit-finanzierung 0
   set wahrscheinlichkeit-finanzierung (ifelse-value
     Verfügbare-Fördermittel = "niedrig"  [ 0.05 ]
-    Verfügbare-Fördermittel = "mittel"  [ 0.4 ]
-    Verfügbare-Fördermittel = "hoch"  [ 0.75 ]
+    Verfügbare-Fördermittel = "mittel"  [ 0.25 ]
+    Verfügbare-Fördermittel = "hoch"  [ 0.5 ]
     [0 ]) ;
 
   ; Entscheidung wird zufällig getroffen
@@ -381,7 +386,7 @@ end
 
 to verdrängung-prozess
   ask anwohnerschaft with [umzugsentscheidung?] [
-
+     setxy [pxcor] of one-of patches with [pcolor = grey - 3] [pycor] of one-of patches with [pcolor = grey - 3]
 
   ]
 end
@@ -512,11 +517,11 @@ NIL
 1
 
 MONITOR
-357
-32
-415
-77
-Monate
+348
+45
+406
+90
+Monat
 aktueller-monat
 17
 1
@@ -524,14 +529,14 @@ aktueller-monat
 
 SLIDER
 31
-102
+136
 476
-135
+169
 Anteil-Modernisierte-Wohnungen-zu-Beginn
 Anteil-Modernisierte-Wohnungen-zu-Beginn
 0
 100
-16.0
+31.0
 1
 1
 %
@@ -658,7 +663,7 @@ NIL
 1
 
 PLOT
-684
+814
 180
 1008
 305
@@ -666,14 +671,14 @@ Mietkosten
 € / m2 und Monat
 NIL
 0.0
-15.0
+20.0
 0.0
 10.0
 true
 false
 "" ""
 PENS
-"default" 0.5 1 -16777216 true "" "histogram [mietkosten] of wohnverhältnisse"
+"Mietkosten" 0.5 1 -16777216 true "" "histogram [mietkosten] of wohnverhältnisse"
 
 CHOOSER
 32
@@ -683,7 +688,7 @@ CHOOSER
 Verfügbare-Fördermittel
 Verfügbare-Fördermittel
 "keine" "niedrig" "mittel" "hoch"
-1
+3
 
 SLIDER
 32
@@ -716,11 +721,11 @@ true
 true
 "" ""
 PENS
-"Nicht begonnen" 1.0 0 -2139308 true "" "plot count eigentumsverhältnisse with [modernisiernisierung-status = \"nicht begonnen\"]"
-"In Finanzierung" 1.0 0 -7500403 true "" "plot count eigentumsverhältnisse with [modernisiernisierung-status = \"in Finanzierung\"]"
-"In Planung" 1.0 0 -5207188 true "" "plot count eigentumsverhältnisse with [modernisiernisierung-status = \"in Planung\"]"
-"In Bau" 1.0 0 -723837 true "" "plot count eigentumsverhältnisse with [modernisiernisierung-status = \"in Bau\"]"
-"modernisiert" 1.0 0 -8330359 true "" "plot count eigentumsverhältnisse with [modernisiernisierung-status = \"erledigt\"]"
+"Nicht begonnen" 1.0 0 -2139308 true "" "plot count eigentumsverhältnisse with [modernisierungs-status = \"nicht begonnen\"]"
+"In Finanzierung" 1.0 0 -7500403 true "" "plot count eigentumsverhältnisse with [modernisierungs-status = \"in Finanzierung\"]"
+"In Planung" 1.0 0 -5207188 true "" "plot count eigentumsverhältnisse with [modernisierungs-status = \"in Planung\"]"
+"In Bau" 1.0 0 -723837 true "" "plot count eigentumsverhältnisse with [modernisierungs-status = \"in Bau\"]"
+"modernisiert" 1.0 0 -8330359 true "" "plot count eigentumsverhältnisse with [modernisierungs-status = \"erledigt\"]"
 
 SLIDER
 32
@@ -731,47 +736,47 @@ Verfügbarkeit-Handwerks-und-Bauleistungen
 Verfügbarkeit-Handwerks-und-Bauleistungen
 0
 25
-2.0
+8.0
 1
 1
 Gebäude pro Monat
 HORIZONTAL
 
 SLIDER
-27
-441
-464
-474
+32
+360
+543
+393
 Umzugsentscheidung-bei-Modernisierungsankündigung
 Umzugsentscheidung-bei-Modernisierungsankündigung
 0
-100
-18.0
+25
+8.0
 1
 1
 %
 HORIZONTAL
 
 SLIDER
-26
-484
-469
-517
+31
+403
+542
+436
 Durchschnittliche-Kosten-für-energetische-Modernisierung
 Durchschnittliche-Kosten-für-energetische-Modernisierung
-100
-300
-210.0
-10
+5000
+50000
+9000.0
+1000
 1
-€/m2
+€
 HORIZONTAL
 
 MONITOR
-291
-31
-348
-76
+285
+46
+342
+91
 Jahr
 aktuelles-jahr
 17
@@ -779,26 +784,26 @@ aktuelles-jahr
 11
 
 SLIDER
-26
-528
-466
-561
+31
+447
+543
+480
 Maximale-Modernisierungsmieterhöhung
 Maximale-Modernisierungsmieterhöhung
 0
 100
-46.0
+8.0
 1
 1
 % der Modernisierungskosten
 HORIZONTAL
 
 PLOT
-742
-473
-942
-623
-plot 1
+580
+179
+810
+305
+Durchschnittliche Miete pro qm
 NIL
 NIL
 0.0
@@ -810,6 +815,21 @@ false
 "" ""
 PENS
 "default" 1.0 0 -16777216 true "" "plot mean [mietkosten] of wohnverhältnisse"
+
+SLIDER
+32
+71
+256
+104
+Simulationszeit
+Simulationszeit
+0
+20
+15.0
+1
+1
+Jahre
+HORIZONTAL
 
 @#$#@#$#@
 ## WHAT IS IT?
