@@ -15,7 +15,7 @@ globals [
 
 ; Verschiedene Agententypen
 breed [ anwohnerschaft anwohner ]
-anwohnerschaft-own [ verfügbares-einkommen mietrechtliche-kenntnisse umzugsentscheidung? weggezogen? ]
+anwohnerschaft-own [ finanzieller-druck? dauer-finanzieller-druck mietrechtliche-kenntnisse umzugsentscheidung? weggezogen? ]
 
 breed [gebäudeeigentümerschaft gebäudeeigentümer]
 gebäudeeigentümerschaft-own [typ investitionsbereitschaft mieteinnahmen ]
@@ -23,19 +23,15 @@ gebäudeeigentümerschaft-own [typ investitionsbereitschaft mieteinnahmen ]
 breed [bebauung gebäude]
 bebauung-own [ anzahl_wohnungen grundflache brutto_grundflache wärmebedarf_unsaniert wärmebedarf_saniert saniert? aktueller_wärmebedarf anwohner_im_gebäude]
 
-breed [gewerbetreiberschaft gewerbebetreiber]
-
-breed [handwerkerschaft handwerker]
-
-breed [beratungsleistungen beratungsleistung]
-
 
 ; Verschiedene Netzwerke
 undirected-link-breed [wohnverhältnisse wohnverhältnis ]
-wohnverhältnisse-own [gemietet? preisbindung? mietkosten anzahl-mieterhöhungen]
+wohnverhältnisse-own [gemietet? preisbindung? mietkosten anzahl-mieterhöhungen zeitpunkte-mieterhöhung]
 
 undirected-link-breed [eigentumsverhältnisse eigentumsverhältnis]
 eigentumsverhältnisse-own [modernisierungs-status verbleibende-zeit]
+
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;; Modell-Setup  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -116,6 +112,7 @@ to setup
           set hidden? true
           set umzugsentscheidung? false
           set weggezogen? false
+          set finanzieller-druck? false
 
           ; Einkommen der Anwohner
           ; nach Stadtteilprofil 2022: 3780 Sozialversicherungspflichtig Beschäftigte
@@ -124,6 +121,7 @@ to setup
           create-wohnverhältnis-with myself [
             set anzahl-mieterhöhungen 0
             set preisbindung? false
+            set zeitpunkte-mieterhöhung []
 
             ; In 6% der Fälle sind die Wohnungen von den Eigentümer:innen bewohnt
             let zufall_vermietet random-float 1
@@ -348,6 +346,8 @@ to mieterhöhung-prozess ; Auf Basis des gemeinsam modellierten Prozesses
               set mietkosten (mietkosten + umlage)
 
               set anzahl-mieterhöhungen anzahl-mieterhöhungen + 1
+
+              set zeitpunkte-mieterhöhung insert-item 0 zeitpunkte-mieterhöhung ticks
             ]
           ]
         ]
@@ -387,8 +387,46 @@ to-report finanzierung-suchen
 end
 
 to verdrängung-prozess
+
+  ; Mieterhöhung checken
+  ask anwohnerschaft with [any? my-wohnverhältnisse with [gemietet?] and not weggezogen?]  [
+
+    if length [zeitpunkte-mieterhöhung] of one-of my-wohnverhältnisse > 0 [
+
+      ; Wurde in diesem Monat eine Mieterhöhung vorgenommen?
+      let letzte-erhöhung [first zeitpunkte-mieterhöhung] of my-wohnverhältnisse
+
+      if letzte-erhöhung = ticks [
+
+        ; Gerät der:die Anwohner:in in finanziellen Druck?
+        let zufall-finanzieller-druck random-float 1
+
+        if zufall-finanzieller-druck < Anteil-die-nach-Modernisierung-in-finanziellen-Druck-geraten [
+          set finanzieller-druck? true
+        ]
+      ]
+    ]
+
+
+
+  ]
+
+  ; Finanziellen Druck aushalten oder Umzugsentscheidung treffen
+  ask anwohnerschaft with [finanzieller-druck?] [
+    ifelse dauer-finanzieller-druck < Dauer-finanzieller-Druck-bis-zur-Umzugsentscheidung [
+      set dauer-finanzieller-druck dauer-finanzieller-druck + 1
+    ][
+      set umzugsentscheidung? true
+    ]
+  ]
+
+  ;
   ask anwohnerschaft with [umzugsentscheidung?] [
-     setxy [pxcor] of one-of patches with [pcolor = grey - 3] [pycor] of one-of patches with [pcolor = grey - 3]
+    set finanzieller-druck? false
+    set umzugsentscheidung? false
+    set weggezogen? true
+    setxy [pxcor] of one-of patches with [pcolor = grey - 3] [pycor] of one-of patches with [pcolor = grey - 3]
+    ask my-wohnverhältnisse [die]
 
   ]
 end
@@ -506,10 +544,11 @@ NIL
 0.0
 10000.0
 true
-false
+true
 "" ""
 PENS
-"default" 1.0 0 -16777216 true "" "plot count (anwohnerschaft with [not weggezogen?])"
+"Anwohnende" 1.0 0 -13345367 true "" "plot count (anwohnerschaft with [not weggezogen?])"
+"Verdrängt" 1.0 0 -8990512 true "" "plot count (anwohnerschaft with [weggezogen?])"
 
 BUTTON
 1017
@@ -702,7 +741,7 @@ Umzugsentscheidung-bei-Modernisierungsankündigung
 Umzugsentscheidung-bei-Modernisierungsankündigung
 0
 25
-2.0
+14.0
 1
 1
 %
@@ -717,7 +756,7 @@ Durchschnittliche-Kosten-für-energetische-Modernisierung
 Durchschnittliche-Kosten-für-energetische-Modernisierung
 200
 1000
-440.0
+820.0
 10
 1
 € pro m2
@@ -743,7 +782,7 @@ Maximale-Modernisierungsmieterhöhung
 Maximale-Modernisierungsmieterhöhung
 0
 25
-8.0
+18.0
 1
 1
 % der Modernisierungskosten
@@ -781,6 +820,51 @@ Simulationszeit
 1
 1
 Jahre
+HORIZONTAL
+
+SLIDER
+1016
+597
+1529
+630
+Unzulässige-Modernisierungsmieterhöhungen
+Unzulässige-Modernisierungsmieterhöhungen
+0
+100
+14.0
+1
+1
+%
+HORIZONTAL
+
+SLIDER
+27
+511
+543
+544
+Dauer-finanzieller-Druck-bis-zur-Umzugsentscheidung
+Dauer-finanzieller-Druck-bis-zur-Umzugsentscheidung
+0
+12
+10.0
+1
+1
+Monate
+HORIZONTAL
+
+SLIDER
+27
+550
+543
+583
+Anteil-die-nach-Modernisierung-in-finanziellen-Druck-geraten
+Anteil-die-nach-Modernisierung-in-finanziellen-Druck-geraten
+0
+100
+75.0
+1
+1
+%
 HORIZONTAL
 
 @#$#@#$#@
