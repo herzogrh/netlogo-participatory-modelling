@@ -32,7 +32,7 @@ breed [beratungsleistungen beratungsleistung]
 
 ; Verschiedene Netzwerke
 undirected-link-breed [wohnverhältnisse wohnverhältnis ]
-wohnverhältnisse-own [gemietet? preisbindung? mietkosten]
+wohnverhältnisse-own [gemietet? preisbindung? mietkosten anzahl-mieterhöhungen]
 
 undirected-link-breed [eigentumsverhältnisse eigentumsverhältnis]
 eigentumsverhältnisse-own [modernisierungs-status verbleibende-zeit]
@@ -122,6 +122,8 @@ to setup
 
           ; Wohnverhältnis ausgestalten
           create-wohnverhältnis-with myself [
+            set anzahl-mieterhöhungen 0
+            set preisbindung? false
 
             ; In 6% der Fälle sind die Wohnungen von den Eigentümer:innen bewohnt
             let zufall_vermietet random-float 1
@@ -334,18 +336,18 @@ to mieterhöhung-prozess ; Auf Basis des gemeinsam modellierten Prozesses
 
         ; Modernisierungsmieterhöhung durchführen
         ; Gesamtkosten der Sanierung berechnen
-        let umlage Durchschnittliche-Kosten-für-energetische-Modernisierung * (Maximale-Modernisierungsmieterhöhung / 100) / 12 / [brutto_grundflache] of other-end
+        let umlage Durchschnittliche-Kosten-für-energetische-Modernisierung * [grundflache] of other-end * (Maximale-Modernisierungsmieterhöhung / 100) / 12 / [brutto_grundflache] of other-end
         let anzahl_mieter:innen count ([my-wohnverhältnisse] of other-end) with [gemietet?]
 
         if anzahl_mieter:innen > 0 [
-          let erhöhung_pro_mieter umlage / anzahl_mieter:innen
-          if erhöhung_pro_mieter > 1 [show erhöhung_pro_mieter]
 
 
           ; Miete erhöhen
-          ask [wohnverhältnisse] of other-end [
+          ask [my-wohnverhältnisse] of other-end [
             if gemietet? and not preisbindung? [
-              set mietkosten (mietkosten + erhöhung_pro_mieter)
+              set mietkosten (mietkosten + umlage)
+
+              set anzahl-mieterhöhungen anzahl-mieterhöhungen + 1
             ]
           ]
         ]
@@ -465,57 +467,6 @@ NIL
 NIL
 1
 
-BUTTON
-1017
-494
-1140
-527
-Karte anzeigen
-show-map
-NIL
-1
-T
-OBSERVER
-NIL
-NIL
-NIL
-NIL
-1
-
-BUTTON
-1249
-494
-1396
-527
-Netzwerk anzeigen
-show-network
-NIL
-1
-T
-OBSERVER
-NIL
-NIL
-NIL
-NIL
-1
-
-BUTTON
-1489
-493
-1639
-526
-Karte zurücksetzen
-clear-map
-NIL
-1
-T
-OBSERVER
-NIL
-NIL
-NIL
-NIL
-1
-
 MONITOR
 348
 45
@@ -553,7 +504,7 @@ NIL
 0.0
 10.0
 0.0
-10.0
+10000.0
 true
 false
 "" ""
@@ -561,10 +512,10 @@ PENS
 "default" 1.0 0 -16777216 true "" "plot count (anwohnerschaft with [not weggezogen?])"
 
 BUTTON
-1018
-553
-1176
-586
+1017
+494
+1175
+527
 Wohngebäude anzeigen
 gebäude-anzeigen
 NIL
@@ -578,10 +529,10 @@ NIL
 1
 
 BUTTON
-1018
-590
-1176
-623
+1017
+531
+1175
+564
 Wohngebäude ausblenden
 gebäude-ausblenden
 NIL
@@ -595,10 +546,10 @@ NIL
 1
 
 BUTTON
-1187
-554
-1395
-587
+1186
+495
+1394
+528
 Anwohner:innen anzeigen
 anwohner-anzeigen
 NIL
@@ -612,10 +563,10 @@ NIL
 1
 
 BUTTON
-1187
-591
-1395
-624
+1186
+532
+1394
+565
 Anwohner:innen ausblenden
 anwohner-ausblenden
 NIL
@@ -629,10 +580,10 @@ NIL
 1
 
 BUTTON
-1405
-551
-1637
-584
+1404
+492
+1636
+525
 Gebäudeeigentümer anzeigen
 eigentümer-anzeigen
 NIL
@@ -646,10 +597,10 @@ NIL
 1
 
 BUTTON
-1405
-590
-1636
-623
+1404
+531
+1635
+564
 Gebäudeeigentümer ausblenden
 eigentümer-ausblenden
 NIL
@@ -663,10 +614,10 @@ NIL
 1
 
 PLOT
-814
-180
-1008
-305
+537
+179
+731
+304
 Mietkosten
 € / m2 und Monat
 NIL
@@ -688,7 +639,7 @@ CHOOSER
 Verfügbare-Fördermittel
 Verfügbare-Fördermittel
 "keine" "niedrig" "mittel" "hoch"
-3
+2
 
 SLIDER
 32
@@ -751,7 +702,7 @@ Umzugsentscheidung-bei-Modernisierungsankündigung
 Umzugsentscheidung-bei-Modernisierungsankündigung
 0
 25
-8.0
+2.0
 1
 1
 %
@@ -764,12 +715,12 @@ SLIDER
 436
 Durchschnittliche-Kosten-für-energetische-Modernisierung
 Durchschnittliche-Kosten-für-energetische-Modernisierung
-5000
-50000
-9000.0
+200
 1000
+440.0
+10
 1
-€
+€ pro m2
 HORIZONTAL
 
 MONITOR
@@ -791,7 +742,7 @@ SLIDER
 Maximale-Modernisierungsmieterhöhung
 Maximale-Modernisierungsmieterhöhung
 0
-100
+25
 8.0
 1
 1
@@ -799,11 +750,11 @@ Maximale-Modernisierungsmieterhöhung
 HORIZONTAL
 
 PLOT
-580
+738
 179
-810
+1007
 305
-Durchschnittliche Miete pro qm
+⌀ Miete pro qm
 NIL
 NIL
 0.0
@@ -811,10 +762,11 @@ NIL
 0.0
 10.0
 true
-false
+true
 "" ""
 PENS
-"default" 1.0 0 -16777216 true "" "plot mean [mietkosten] of wohnverhältnisse"
+"Ohne Preisbindung" 1.0 0 -16777216 true "" "plot mean [mietkosten] of wohnverhältnisse with [not preisbindung? and gemietet?]"
+"Mit Preisbindung" 1.0 0 -7500403 true "" "plot mean [mietkosten] of wohnverhältnisse with [preisbindung? and gemietet?]"
 
 SLIDER
 32
